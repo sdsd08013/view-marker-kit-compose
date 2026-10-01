@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,17 +32,24 @@ import io.github.sdsd08013.viewmarkerkit.compose.EdgeMode
 import io.github.sdsd08013.viewmarkerkit.compose.MarkerOverlay
 
 class MainActivity : ComponentActivity() {
+    private var frameMetrics: FrameMetricsLogger? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // `adb shell am start ... --ei markers 200 --ez walk false` for stress tests
+        val count = intent.getIntExtra("markers", 0)
+        val pins = if (count <= 0) defaultPins else gridPins(count)
+        val walk = intent.getBooleanExtra("walk", true)
+        if (intent.getBooleanExtra("metrics", false)) frameMetrics = FrameMetricsLogger(this)
         setContent {
             MaterialTheme {
-                MapScreen()
+                MapScreen(pins, walk, metrics = intent.getBooleanExtra("metrics", false))
             }
         }
     }
 }
 
-private val initialPins = listOf(
+private val defaultPins = listOf(
     Pin(1, LatLng(35.6812, 139.7671), "Tokyo", Color(0xFFE53935)),
     Pin(2, LatLng(35.6586, 139.7454), "Tower", Color(0xFF1E88E5)),
     Pin(3, LatLng(35.7101, 139.8107), "Skytree", Color(0xFF43A047)),
@@ -49,16 +57,49 @@ private val initialPins = listOf(
     Pin(5, LatLng(35.6595, 139.7005), "Shibuya", Color(0xFF8E24AA)),
 )
 
+/** [count] pins on a grid around Tokyo, about 0.6 degree wide. */
+private fun gridPins(count: Int): List<Pin> {
+    val columns = Math.ceil(Math.sqrt(count.toDouble())).toInt()
+    val step = 0.6 / columns
+    return List(count) { i ->
+        val row = i / columns
+        val col = i % columns
+        Pin(
+            id = (i + 1).toLong(),
+            location = LatLng(35.68 - 0.3 + row * step, 139.75 - 0.3 + col * step),
+            label = (i + 1).toString(),
+            color = Color(0xFF000000 or ((0x4F7F9FL + i * 0x3A2B1CL) and 0xFFFFFFL)),
+        )
+    }
+}
+
 @Composable
-private fun MapScreen() {
+private fun MapScreen(initialPins: List<Pin>, walk: Boolean, metrics: Boolean = false) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(35.68, 139.75), 12f)
     }
+    // Counts camera updates (= overlay relayouts) and logs the rate (stress tests only)
+    LaunchedEffect(metrics) {
+        if (!metrics) return@LaunchedEffect
+        var updates = 0L
+        var windowStart = 0L
+        snapshotFlow { cameraPositionState.position }.collect {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (windowStart == 0L) windowStart = now
+            updates++
+            if (now - windowStart >= 2000) {
+                android.util.Log.i("UpdateRate", "%.1f updates/s per marker".format(updates / ((now - windowStart) / 1000.0)))
+                updates = 0; windowStart = now
+            }
+        }
+    }
+
     var clamp by remember { mutableStateOf(false) }
     var pins by remember { mutableStateOf(initialPins) }
 
     // Move the first pin around in a small circle: a new list with a moved pin on every frame
-    LaunchedEffect(Unit) {
+    LaunchedEffect(walk) {
+        if (!walk) return@LaunchedEffect
         val center = initialPins[0].location
         val start = withFrameMillis { it }
         while (true) {
