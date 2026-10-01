@@ -1,0 +1,4 @@
+jdk:
+  - openjdk17
+install:
+  - ./gradlew :viewmarkerkit-compose:publishReleasePublicationToMavenLocal -Pversion=$VERSION
