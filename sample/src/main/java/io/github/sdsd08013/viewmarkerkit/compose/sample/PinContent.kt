@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,8 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sdsd08013.viewmarkerkit.compose.MarkerPlacement
@@ -39,13 +40,18 @@ fun PinContent(pin: Pin, placement: MarkerPlacement) {
         bouncing = false
     }
     val scale by animateFloatAsState(if (bouncing) 1.4f else 1f, spring(), label = "bounce")
-    val atEdge = placement.descriptor?.isAtEdge == true
+    // descriptor changes on every camera frame; recompose only when the edge flag flips
+    val atEdge by remember(placement) { derivedStateOf { placement.descriptor?.isAtEdge == true } }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .scale(scale)
+                // Read the animated scale in the draw phase so the bounce does not recompose
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
                 .clip(CircleShape)
                 .background(pin.color.copy(alpha = if (atEdge) 0.6f else 1f))
                 .border(3.dp, Color.White, CircleShape)
